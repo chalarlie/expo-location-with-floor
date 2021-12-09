@@ -16,6 +16,9 @@ import android.os.Bundle;
 import android.os.IBinder;
 import androidx.annotation.Nullable;
 import android.util.Log;
+import android.content.pm.PackageManager;
+import android.content.pm.ApplicationInfo;
+import android.content.res.Resources;
 
 public class LocationTaskService extends Service {
   private static final String TAG = "LocationTaskService";
@@ -25,6 +28,9 @@ public class LocationTaskService extends Service {
   private Context mParentContext;
   private int mServiceId = sServiceId++;
   private final IBinder mBinder = new ServiceBinder();
+
+  private static final String META_DATA_DEFAULT_ICON_KEY = "expo.modules.notifications.default_notification_icon";
+  public static final String META_DATA_DEFAULT_COLOR_KEY = "expo.modules.notifications.default_notification_color";
 
   public class ServiceBinder extends Binder {
     public LocationTaskService getService() {
@@ -62,18 +68,39 @@ public class LocationTaskService extends Service {
     stopSelf();
   }
 
-  @Override
-  public void onTaskRemoved(Intent rootIntent) {
-    super.onTaskRemoved(rootIntent);
-    stop();
-  }
-
   public void startForeground(Bundle serviceOptions) {
     Notification notification = buildServiceNotification(serviceOptions);
     startForeground(mServiceId, notification);
   }
 
   //region private
+
+  private int getIcon() {
+    try {
+      ApplicationInfo ai = getPackageManager().getApplicationInfo(getPackageName(), PackageManager.GET_META_DATA);
+      if (ai.metaData.containsKey(META_DATA_DEFAULT_ICON_KEY)) {
+        return ai.metaData.getInt(META_DATA_DEFAULT_ICON_KEY);
+      }
+    } catch (PackageManager.NameNotFoundException | ClassCastException e) {
+      Log.e("expo-location", "Could not have fetched default notification icon.");
+    }
+    return getApplicationInfo().icon;
+  }
+
+  @Nullable
+  private Integer getIconColor() {
+    try {
+      ApplicationInfo ai = getPackageManager().getApplicationInfo(getPackageName(), PackageManager.GET_META_DATA);
+      if (ai.metaData.containsKey(META_DATA_DEFAULT_COLOR_KEY)) {
+          return getResources().getColor(ai.metaData.getInt(META_DATA_DEFAULT_COLOR_KEY), null);
+        }
+    } catch (PackageManager.NameNotFoundException | Resources.NotFoundException | ClassCastException e) {
+      Log.e("expo-location", "Could not have fetched default notification icon color.");
+    }
+
+    // No custom color
+    return null;
+  }
 
   @TargetApi(26)
   private Notification buildServiceNotification(Bundle serviceOptions) {
@@ -106,7 +133,8 @@ public class LocationTaskService extends Service {
     }
 
     return builder.setCategory(Notification.CATEGORY_SERVICE)
-        .setSmallIcon(getApplicationInfo().icon)
+        .setSmallIcon(getIcon())
+        .setColor(getIconColor())
         .build();
   }
 

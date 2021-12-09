@@ -3,7 +3,7 @@
 #import <CoreLocation/CLLocationManager.h>
 #import <CoreLocation/CLErrorDomain.h>
 
-#import <ExpoModulesCore/EXUtilities.h>
+#import <UMCore/UMUtilities.h>
 #import <EXLocation/EXLocation.h>
 #import <EXLocation/EXLocationTaskConsumer.h>
 #import <UMTaskManagerInterface/UMTaskInterface.h>
@@ -42,7 +42,7 @@
 
 - (void)didRegisterTask:(id<UMTaskInterface>)task
 {
-  [EXUtilities performSynchronouslyOnMainThread:^{
+  [UMUtilities performSynchronouslyOnMainThread:^{
     CLLocationManager *locationManager = [CLLocationManager new];
 
     self->_task = task;
@@ -63,7 +63,7 @@
 
 - (void)setOptions:(NSDictionary *)options
 {
-  [EXUtilities performSynchronouslyOnMainThread:^{
+  [UMUtilities performSynchronouslyOnMainThread:^{
     CLLocationManager *locationManager = self->_locationManager;
     EXLocationAccuracy accuracy = [options[@"accuracy"] unsignedIntegerValue] ?: EXLocationAccuracyBalanced;
 
@@ -72,7 +72,9 @@
     locationManager.activityType = [EXLocation CLActivityTypeFromOption:[options[@"activityType"] integerValue]];
     locationManager.pausesLocationUpdatesAutomatically = [options[@"pausesUpdatesAutomatically"] boolValue];
 
-    locationManager.showsBackgroundLocationIndicator = [options[@"showsBackgroundLocationIndicator"] boolValue];
+    if (@available(iOS 11.0, *)) {
+      locationManager.showsBackgroundLocationIndicator = [options[@"showsBackgroundLocationIndicator"] boolValue];
+    }
 
     [locationManager startUpdatingLocation];
     [locationManager startMonitoringSignificantLocationChanges];
@@ -106,7 +108,7 @@
 
 - (void)reset
 {
-  [EXUtilities performSynchronouslyOnMainThread:^{
+  [UMUtilities performSynchronouslyOnMainThread:^{
     [self->_locationManager stopUpdatingLocation];
     [self->_locationManager stopMonitoringSignificantLocationChanges];
     [self->_deferredLocations removeAllObjects];

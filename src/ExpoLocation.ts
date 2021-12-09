@@ -1,2 +1,2 @@
-import { NativeModulesProxy } from 'expo-modules-core';
+import { NativeModulesProxy } from '@unimodules/core';
 export default NativeModulesProxy.ExpoLocation;

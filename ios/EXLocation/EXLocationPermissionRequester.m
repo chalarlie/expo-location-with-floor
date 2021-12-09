@@ -1,54 +1,82 @@
 // Copyright 2016-present 650 Industries. All rights reserved.
 
-#import <EXLocation/EXBaseLocationRequester.h>
-#import <ExpoModulesCore/EXUtilities.h>
+#import <EXLocation/EXLocationPermissionRequester.h>
+#import <UMCore/UMUtilities.h>
 
 #import <objc/message.h>
+#import <CoreLocation/CLLocationManager.h>
 #import <CoreLocation/CLLocationManagerDelegate.h>
 
-@interface EXBaseLocationRequester () <CLLocationManagerDelegate>
+static SEL alwaysAuthorizationSelector;
+static SEL whenInUseAuthorizationSelector;
 
-@property (nonatomic, assign) bool locationManagerWasCalled;
+@interface EXLocationPermissionRequester () <CLLocationManagerDelegate>
 
+@property (nonatomic, strong) CLLocationManager *locMgr;
+@property (nonatomic, strong) UMPromiseResolveBlock resolve;
+@property (nonatomic, strong) UMPromiseRejectBlock reject;
 
 @end
 
-@implementation EXBaseLocationRequester
+@implementation EXLocationPermissionRequester
 
-# pragma mark - Abstract methods
-
-- (void)requestLocationPermissions
++ (NSString *)permissionType
 {
-  @throw([NSException exceptionWithName:@"NotImplemented" reason:@"requestLocationPermissions should be implemented" userInfo:nil]);
+  return @"location";
 }
 
-+ (NSString *)permissionType {
-  @throw([NSException exceptionWithName:@"NotImplemented" reason:@"permissionType should be implemented" userInfo:nil]);
-}
-
-- (NSDictionary *)parsePermissions:(CLAuthorizationStatus)systemStatus
++ (void)load
 {
-  @throw([NSException exceptionWithName:@"NotImplemented" reason:@"parsePermissions should be implemented" userInfo:nil]);
+  alwaysAuthorizationSelector = NSSelectorFromString([@"request" stringByAppendingString:@"AlwaysAuthorization"]);
+  whenInUseAuthorizationSelector = NSSelectorFromString([@"request" stringByAppendingString:@"WhenInUseAuthorization"]);
 }
 
-# pragma mark - UMPermissionsRequester
-
-- (NSDictionary *)getPermissions {
+- (NSDictionary *)getPermissions
+{
+  UMPermissionStatus status;
+  NSString *scope = @"none";
   
   CLAuthorizationStatus systemStatus;
-  if (![EXBaseLocationRequester isConfiguredForAlwaysAuthorization] && ![EXBaseLocationRequester isConfiguredForWhenInUseAuthorization]) {
-    EXFatal(EXErrorWithMessage(@"This app is missing usage descriptions, so location services will fail. Add one of the `NSLocation*UsageDescription` keys to your bundle's Info.plist. See https://bit.ly/2P5fEbG (https://docs.expo.io/versions/latest/guides/app-stores.html#system-permissions-dialogs-on-ios) for more information."));
+  if (![[self class] isConfiguredForAlwaysAuthorization] && ![[self class] isConfiguredForWhenInUseAuthorization]) {
+    UMFatal(UMErrorWithMessage(@"This app is missing usage descriptions, so location services will fail. Add one of the `NSLocation*UsageDescription` keys to your bundle's Info.plist. See https://bit.ly/2P5fEbG (https://docs.expo.io/versions/latest/guides/app-stores.html#system-permissions-dialogs-on-ios) for more information."));
     systemStatus = kCLAuthorizationStatusDenied;
   } else {
     systemStatus = [CLLocationManager authorizationStatus];
   }
   
-  return [self parsePermissions:systemStatus];
+  switch (systemStatus) {
+    case kCLAuthorizationStatusAuthorizedWhenInUse: {
+      status = UMPermissionStatusGranted;
+      scope = @"whenInUse";
+      break;
+    }
+    case kCLAuthorizationStatusAuthorizedAlways: {
+      status = UMPermissionStatusGranted;
+      scope = @"always";
+      break;
+    }
+    case kCLAuthorizationStatusDenied: case kCLAuthorizationStatusRestricted: {
+      status = UMPermissionStatusDenied;
+      break;
+    }
+    case kCLAuthorizationStatusNotDetermined: default: {
+      status = UMPermissionStatusUndetermined;
+      break;
+    }
+  }
+  
+  return @{
+           @"status": @(status),
+           @"ios": @{
+               @"scope": scope,
+               },
+           };
 }
 
-- (void)requestPermissionsWithResolver:(EXPromiseResolveBlock)resolve rejecter:(EXPromiseRejectBlock)reject {
+- (void)requestPermissionsWithResolver:(UMPromiseResolveBlock)resolve rejecter:(UMPromiseRejectBlock)reject
+{
   NSDictionary *existingPermissions = [self getPermissions];
-  if (existingPermissions && [existingPermissions[@"status"] intValue] != EXPermissionStatusUndetermined) {
+  if (existingPermissions && [existingPermissions[@"status"] intValue] != UMPermissionStatusUndetermined) {
     // since permissions are already determined, the iOS request methods will be no-ops.
     // just resolve with whatever existing permissions.
     resolve(existingPermissions);
@@ -56,12 +84,11 @@
     _resolve = resolve;
     _reject = reject;
 
-    EX_WEAKIFY(self)
-    [EXUtilities performSynchronouslyOnMainThread:^{
-      EX_ENSURE_STRONGIFY(self)
-      self.locationManagerWasCalled = false;
-      self.locationManager = [[CLLocationManager alloc] init];
-      self.locationManager.delegate = self;
+    UM_WEAKIFY(self)
+    [UMUtilities performSynchronouslyOnMainThread:^{
+      UM_ENSURE_STRONGIFY(self)
+      self.locMgr = [[CLLocationManager alloc] init];
+      self.locMgr.delegate = self;
     }];
 
     // 1. Why do we call CLLocationManager methods by those dynamically created selectors?
@@ -92,8 +119,31 @@
     //    To support this use case we will have to change the way location authorization is requested
     //    from promise-based to listener-based.
 
-    [self requestLocationPermissions];
+    if ([[self class] isConfiguredForAlwaysAuthorization] && [_locMgr respondsToSelector:alwaysAuthorizationSelector]) {
+      ((void (*)(id, SEL))objc_msgSend)(_locMgr, alwaysAuthorizationSelector);
+    } else if ([[self class] isConfiguredForWhenInUseAuthorization] && [_locMgr respondsToSelector:whenInUseAuthorizationSelector]) {
+      ((void (*)(id, SEL))objc_msgSend)(_locMgr, whenInUseAuthorizationSelector);
+    } else {
+      _reject(@"E_LOCATION_INFO_PLIST", @"One of the `NSLocation*UsageDescription` keys must be present in Info.plist to be able to use geolocation.", nil);
+    }
   }
+}
+
+# pragma mark - internal
+
++ (BOOL)isConfiguredForWhenInUseAuthorization
+{
+  return [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"] != nil;
+}
+
++ (BOOL)isConfiguredForAlwaysAuthorization
+{
+  if (@available(iOS 11.0, *)) {
+    return [self isConfiguredForWhenInUseAuthorization] && [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysAndWhenInUseUsageDescription"];
+  }
+
+  // iOS 10 fallback
+  return [self isConfiguredForWhenInUseAuthorization] && [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysUsageDescription"];
 }
 
 #pragma mark - CLLocationManagerDelegate
@@ -113,14 +163,12 @@
   // if Permissions.LOCATION is being called for the first time on iOS devide and prompts for user action it might not call this callback at all
   // it happens if user requests more that one permission at the same time via Permissions.askAsync(...) and LOCATION dialog is not being called first
   // to reproduce this find NCL code testing that
-  if (status == kCLAuthorizationStatusNotDetermined || !_locationManagerWasCalled) {
+  if (status == kCLAuthorizationStatusNotDetermined) {
     // CLLocationManager calls this delegate method once on start with kCLAuthorizationNotDetermined even before the user responds
     // to the "Don't Allow" / "Allow" dialog box. This isn't the event we care about so we skip it. See:
     // http://stackoverflow.com/questions/30106341/swift-locationmanager-didchangeauthorizationstatus-always-called/30107511#30107511
-    _locationManagerWasCalled = true;
     return;
   }
-  
   if (_resolve) {
     _resolve([self getPermissions]);
     _resolve = nil;
@@ -128,37 +176,4 @@
   }
 }
 
-- (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager
-{
-  if (@available(iOS 14.0, *)) {
-    CLAuthorizationStatus status = [manager authorizationStatus];
-    if (status == kCLAuthorizationStatusNotDetermined || !_locationManagerWasCalled) {
-      // CLLocationManager calls this delegate method once on start with kCLAuthorizationNotDetermined even before the user responds
-      // to the "Don't Allow" / "Allow" dialog box. This isn't the event we care about so we skip it. See:
-      // http://stackoverflow.com/questions/30106341/swift-locationmanager-didchangeauthorizationstatus-always-called/30107511#30107511
-      _locationManagerWasCalled = true;
-      return;
-    }
- 
-    if (_resolve) {
-      _resolve([self getPermissions]);
-      _resolve = nil;
-      _reject = nil;
-    }
-  }
-}
-
-#pragma mark - Helpers
-  
-+ (BOOL)isConfiguredForWhenInUseAuthorization
-{
-  return [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"] != nil;
-}
-
-+ (BOOL)isConfiguredForAlwaysAuthorization
-{
-  return [self isConfiguredForWhenInUseAuthorization] && [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysAndWhenInUseUsageDescription"];
-}
-
-  
 @end

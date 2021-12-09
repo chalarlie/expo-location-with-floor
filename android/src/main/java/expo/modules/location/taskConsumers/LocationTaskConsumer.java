@@ -21,11 +21,11 @@ import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 
-import expo.modules.core.MapHelper;
-import expo.modules.core.arguments.MapArguments;
-import expo.modules.core.arguments.ReadableArguments;
-import expo.modules.core.interfaces.Arguments;
-import expo.modules.core.interfaces.LifecycleEventListener;
+import org.unimodules.core.MapHelper;
+import org.unimodules.core.arguments.MapArguments;
+import org.unimodules.core.arguments.ReadableArguments;
+import org.unimodules.core.interfaces.Arguments;
+import org.unimodules.core.interfaces.LifecycleEventListener;
 import org.unimodules.interfaces.taskManager.TaskConsumer;
 import org.unimodules.interfaces.taskManager.TaskConsumerInterface;
 import org.unimodules.interfaces.taskManager.TaskExecutionCallback;
@@ -111,10 +111,6 @@ public class LocationTaskConsumer extends TaskConsumer implements TaskConsumerIn
       maybeReportDeferredLocations();
     } else {
       try {
-        if(mLocationClient == null){
-          Log.w(TAG, "LocationClient is null.");
-          return;
-        }
         mLocationClient.getLastLocation().addOnCompleteListener(new OnCompleteListener<Location>() {
           @Override
           public void onComplete(@NonNull Task<Location> task) {
@@ -163,10 +159,6 @@ public class LocationTaskConsumer extends TaskConsumer implements TaskConsumerIn
     return true;
   }
 
-  public static boolean shouldUseForegroundService(Map<String, Object> options) {
-    return options.containsKey(FOREGROUND_SERVICE_KEY);
-  }
-
   //region private
 
   private void startLocationUpdates() {
@@ -207,7 +199,7 @@ public class LocationTaskConsumer extends TaskConsumer implements TaskConsumerIn
 
     ReadableArguments options = new MapArguments(mTask.getOptions());
     final Context context = getContext();
-    boolean useForegroundService = shouldUseForegroundService(mTask.getOptions());
+    boolean useForegroundService = options.containsKey(FOREGROUND_SERVICE_KEY);
 
     if (context == null) {
       Log.w(TAG, "Context not found when trying to start foreground service.");
@@ -231,8 +223,7 @@ public class LocationTaskConsumer extends TaskConsumer implements TaskConsumerIn
       Bundle extras = new Bundle();
       final Bundle serviceOptions = options.getArguments(FOREGROUND_SERVICE_KEY).toBundle();
 
-      // extras param name is appId for legacy reasons
-      extras.putString("appId", mTask.getAppScopeKey());
+      extras.putString("appId", mTask.getAppId());
       extras.putString("taskName", mTask.getName());
       serviceIntent.putExtras(extras);
 
